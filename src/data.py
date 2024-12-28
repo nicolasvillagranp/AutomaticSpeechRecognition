@@ -1,35 +1,49 @@
+import os
 import torch
 import torchaudio
 from torchaudio.transforms import MFCC
 from torch.utils.data import DataLoader, Dataset
 from src.tokenizer import ASREncoderDecoder
-
+import warnings
+warnings.filterwarnings('ignore')
 
 
 data_dir = './data'
+samples_dir = os.path.join(data_dir, 'samples')
+labels_dir = os.path.join(data_dir, 'labels')
+os.makedirs(samples_dir, exist_ok=True)
+os.makedirs(labels_dir, exist_ok=True)
+
 tokenizer = ASREncoderDecoder()
 
 class CustomLibriSpeech(Dataset):
-    def __init__(self, spectograms, labels, input_lengths, label_lengths):
-        self.spectograms = spectograms
-        self.labels = labels
-        self.input_lengths = input_lengths
-        self.label_lengths = label_lengths
+    def __init__(self):
+        # Automatically load file paths for samples and labels
+        self.sample_paths = sorted(
+            [os.path.join(samples_dir, f) for f in os.listdir(samples_dir) if f.endswith('.pt')]
+        )
+        self.label_paths = sorted(
+            [os.path.join(labels_dir, f) for f in os.listdir(labels_dir) if f.endswith('.pt')]
+        )
+
+        if len(self.sample_paths) != len(self.label_paths):
+            raise ValueError("Mismatch between the number of samples and labels.")
+
     def __len__(self):
-        return len(self.spectograms)
+        return len(self.sample_paths)
+
     def __getitem__(self, idx):
-        return (self.spectograms[idx], 
-                self.labels[idx], 
-                self.input_lengths[idx],
-                self.label_lengths[idx]
-                )
+        # Load spectrogram
+        spectrogram = torch.load(self.sample_paths[idx])
+        # Load label
+        label = torch.load(self.label_paths[idx])
+        # Calculate input and label lengths
+        input_length = spectrogram.shape[0] // 2
+        label_length = len(label)
+        return spectrogram, label, input_length, label_length
 
-def get_dataset(subset):
-    spectrograms = []
-    labels = []
-    input_lengths = []
-    label_lengths = []
 
+def preprocess_and_save_data(subset):
     print('Downloading Data...')
     train_dataset = torchaudio.datasets.LIBRISPEECH(
         root=data_dir,
@@ -38,7 +52,7 @@ def get_dataset(subset):
     )
 
     mfcc_transform = MFCC(
-        sample_rate=16000, # Sample rate of mfcc transform
+        sample_rate=16000,
         n_mfcc=40,
         melkwargs={
             'n_fft': 400,
@@ -48,27 +62,35 @@ def get_dataset(subset):
         }
     )
 
-    print('Processing Data....')
-    for (waveform, _, labels, _, _, _) in train_dataset:
-        spec = mfcc_transform(waveform).squeeze(0).transpose(0,1)
-        spectrograms.append(spec)
-        label = torch.Tensor(tokenizer.encode(labels.lower()))
-        labels.append(label)
-        input_lengths.append(spec.shape[0] // 2)
-        label_lengths.append(len(label))
+    print('Processing and saving data...')
+    for idx, (waveform, _, label, _, _, _) in enumerate(train_dataset):
+        # Process spectrogram
+        spec = mfcc_transform(waveform).squeeze(0).transpose(0, 1)
+        sample_path = os.path.join(samples_dir, f'sample_{idx}.pt')
+        torch.save(spec, sample_path)
 
-    return CustomLibriSpeech(spectrograms, labels, input_lengths, label_lengths)
+        # Process label
+        label_tensor = torch.Tensor(tokenizer.encode(label.lower()))
+        label_path = os.path.join(labels_dir, f'label_{idx}.pt')
+        torch.save(label_tensor, label_path)
+
+
+def get_dataset(subset):
+    # Preprocess data and save if directories are empty
+    if not os.listdir(samples_dir) or not os.listdir(labels_dir):
+        preprocess_and_save_data(subset)
+    return CustomLibriSpeech()
 
 
 def get_dataloader(subset, batch_size): 
     def collate_fn(batch):
-        spectograms, labels, input_lengths, label_lengths = zip(*batch)
-        padded_spectograms = torch.nn.utils.rnn.pad_sequence(spectograms, batch_first=True).unsqueeze(1).transpose(2, 3)
+        spectrograms, labels, input_lengths, label_lengths = zip(*batch)
+        padded_spectrograms = torch.nn.utils.rnn.pad_sequence(spectrograms, batch_first=True).unsqueeze(1).transpose(2, 3)
         padded_labels = torch.nn.utils.rnn.pad_sequence(labels, batch_first=True)
         input_lengths = torch.tensor(input_lengths, dtype=torch.long)
         label_lengths = torch.tensor(label_lengths, dtype=torch.long)
         
-        return padded_spectograms, padded_labels, input_lengths, label_lengths
+        return padded_spectrograms, padded_labels, input_lengths, label_lengths
 
     return DataLoader(
         dataset=get_dataset(subset),
