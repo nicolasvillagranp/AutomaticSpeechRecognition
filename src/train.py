@@ -45,8 +45,8 @@ def train(model):
         save_model(model)
 
 if __name__ == '__main__':
-    model = ASRModel(5, 5, 512, 40, 28)
-    load_model(model)
+    model = ASRModel(1, 2, 256, 40, 28)
+    # load_model(model)
     train(model)
 
     

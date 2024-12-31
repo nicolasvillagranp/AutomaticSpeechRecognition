@@ -9,26 +9,17 @@ warnings.filterwarnings('ignore')
 
 
 data_dir = './data'
-samples_dir = os.path.join(data_dir, 'samples')
-labels_dir = os.path.join(data_dir, 'labels')
-os.makedirs(samples_dir, exist_ok=True)
-os.makedirs(labels_dir, exist_ok=True)
-
 tokenizer = ASREncoderDecoder()
 
+
 class CustomLibriSpeech(Dataset):
-    def __init__(self):
-        # Automatically load file paths for samples and labels
+    def __init__(self, samples_dir, labels_dir):
         self.sample_paths = sorted(
             [os.path.join(samples_dir, f) for f in os.listdir(samples_dir) if f.endswith('.pt')]
         )
         self.label_paths = sorted(
             [os.path.join(labels_dir, f) for f in os.listdir(labels_dir) if f.endswith('.pt')]
         )
-
-        if len(self.sample_paths) != len(self.label_paths):
-            raise ValueError("Mismatch between the number of samples and labels.")
-
     def __len__(self):
         return len(self.sample_paths)
 
@@ -43,9 +34,9 @@ class CustomLibriSpeech(Dataset):
         return spectrogram, label, input_length, label_length
 
 
-def preprocess_and_save_data(subset):
-    print('Downloading Data...')
-    train_dataset = torchaudio.datasets.LIBRISPEECH(
+def preprocess_and_save_data(subset, samples_dir, labels_dir):
+    print(f'Downloading {subset}...')
+    dataset = torchaudio.datasets.LIBRISPEECH(
         root=data_dir,
         url=subset,
         download=True
@@ -62,27 +53,24 @@ def preprocess_and_save_data(subset):
         }
     )
 
-    print('Processing and saving data...')
-    for idx, (waveform, _, label, _, _, _) in enumerate(train_dataset):
+    print(f'Processing and saving {subset}...')
+    for idx, (waveform, _, label, _, _, _) in enumerate(dataset):
         # Process spectrogram
         spec = mfcc_transform(waveform).squeeze(0).transpose(0, 1)
         sample_path = os.path.join(samples_dir, f'sample_{idx}.pt')
         torch.save(spec, sample_path)
-
-        # Process label
         label_tensor = torch.Tensor(tokenizer.encode(label.lower()))
         label_path = os.path.join(labels_dir, f'label_{idx}.pt')
         torch.save(label_tensor, label_path)
 
 
-def get_dataset(subset):
-    # Preprocess data and save if directories are empty
+def get_dataset(subset, samples_dir, labels_dir):
     if not os.listdir(samples_dir) or not os.listdir(labels_dir):
-        preprocess_and_save_data(subset)
-    return CustomLibriSpeech()
+        preprocess_and_save_data(subset, samples_dir, labels_dir)
+    return CustomLibriSpeech(samples_dir, labels_dir)
 
 
-def get_dataloader(subset, batch_size): 
+def get_dataloader(subset, batch_size, samples_dir, labels_dir): 
     def collate_fn(batch):
         spectrograms, labels, input_lengths, label_lengths = zip(*batch)
         padded_spectrograms = torch.nn.utils.rnn.pad_sequence(spectrograms, batch_first=True).unsqueeze(1).transpose(2, 3)
@@ -93,16 +81,45 @@ def get_dataloader(subset, batch_size):
         return padded_spectrograms, padded_labels, input_lengths, label_lengths
 
     return DataLoader(
-        dataset=get_dataset(subset),
+        dataset=get_dataset(subset, samples_dir, labels_dir),
         batch_size=batch_size,
         shuffle=True,
         collate_fn=collate_fn
     )
 
-if __name__ == '__main__':
-    # Example of usage
+
+def get_train_dataloader(batch_size):
+    # Create directories
+    train_samples_dir = os.path.join(data_dir, 'train_samples')
+    train_labels_dir = os.path.join(data_dir, 'train_labels')
+    os.makedirs(train_samples_dir, exist_ok=True)
+    os.makedirs(train_labels_dir, exist_ok=True)
     subset = "train-clean-100"
-    dataloader = get_dataloader(subset, 16)
-    for (spectrograms, labels, input_lengths, label_lengths) in dataloader:
+    return get_dataloader(subset, batch_size, train_samples_dir, train_labels_dir)
+
+
+def get_validation_dataloader(batch_size):
+    val_samples_dir = os.path.join(data_dir, 'val_samples')
+    val_labels_dir = os.path.join(data_dir, 'val_labels')
+    os.makedirs(val_samples_dir, exist_ok=True)
+    os.makedirs(val_labels_dir, exist_ok=True)
+    subset = "dev-clean"
+    return get_dataloader(subset, batch_size, val_samples_dir, val_labels_dir)
+
+
+if __name__ == '__main__':
+    # Example usage
+    train_dataloader = get_train_dataloader(16)
+    val_dataloader = get_validation_dataloader(16)
+
+    # Check training data
+    print("Training Data:")
+    for spectrograms, labels, input_lengths, label_lengths in train_dataloader:
+        print(spectrograms.shape)
+        break
+
+    # Check validation data
+    print("Validation Data:")
+    for spectrograms, labels, input_lengths, label_lengths in val_dataloader:
         print(spectrograms.shape)
         break
