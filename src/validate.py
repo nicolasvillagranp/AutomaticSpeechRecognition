@@ -1,61 +1,87 @@
+import torch
+from tqdm import tqdm
 from torchaudio.functional import edit_distance
 from torchaudio.models.decoder import ctc_decoder
-from torchaudio.models.decoder import ctc_decoder_config
+
 from src.data import get_validation_dataloader
 from src.model import ASRModel, load_model
-from src.tokenizer import ASREncoderDecoder
-import torch
+from src.tokenizer import ASREncoderDecoder  # your class
 
+
+
+
+"""
+I do not wet3
+"""
 
 def validate_model(model, dataloader, tokenizer):
-    # Initialize the decoder for beam search
-    decoder_config = ctc_decoder_config(
-        beam_width=5,  # Number of beams
-        blank_id=0,  # CTC blank id
-        logits_length_beam_prune=30.0, 
+    """
+    Validate the model on a given dataloader using a CTC beam search decoder,
+    with a tqdm progress bar to show progress.
+    """
+
+    
+    tokens = [tokenizer.index_to_char[i] for i in range(len(tokenizer))]
+    decoder = ctc_decoder(
+        tokens=tokens,
+        lexicon=[],
+        beam_size=5,           
+        beam_threshold=30.0,    
+        lm_weight=0.0,        
+        word_score=0.0,
+        blank_token="<blank>",  # match ASR encoder-decoder
+        sil_token=" ",         
+        log_add=False,
     )
-    decoder = ctc_decoder(decoder_config)
 
     model.eval()
     total_wer = 0.0
     total_sentences = 0
 
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    model.to(device)
+
     with torch.no_grad():
-        for spectrograms, labels, input_lengths, label_lengths in dataloader:
-            spectrograms = spectrograms.to(torch.device("cuda" if torch.cuda.is_available() else "cpu"))
-            labels = labels.to(spectrograms.device)
-            input_lengths = input_lengths.to(spectrograms.device)
-            label_lengths = label_lengths.to(spectrograms.device)
+        for spectrograms, labels, input_lengths, label_lengths in tqdm(dataloader, desc="Validating", total=len(dataloader)):
+            spectrograms = spectrograms.to(device)
+            labels = labels.to(device)
+            input_lengths = input_lengths.to(device)
+            label_lengths = label_lengths.to(device)
+            logits = model(spectrograms)   
+            logits = logits.transpose(0, 1) 
+            log_probs = logits.log_softmax(dim=-1)  
 
-            logits = model(spectrograms) 
-            logits = logits.transpose(0, 1)  
+            emissions = log_probs.transpose(0, 1) 
+            decoded_outputs = decoder(
+                emissions.to('cpu').contiguous(),
+                input_lengths.to('cpu').contiguous() )
+            decoded_sentences = [
+                tokenizer.decode(hypotheses[0].tokens) 
+                for hypotheses in decoded_outputs
+            ]
 
-            # Beam Search
-            decoded_outputs = decoder(logits)
-            decoded_sentences = [tokenizer.decode(output[0]) for output in decoded_outputs]
-
-            # Labels to text
             ground_truth_sentences = [
                 tokenizer.decode(labels[i][:label_lengths[i]].tolist())
                 for i in range(len(labels))
             ]
-
-            # Calculate WER
+            # Get WER error
             for gt_sentence, pred_sentence in zip(ground_truth_sentences, decoded_sentences):
-                total_wer += edit_distance(gt_sentence.split(), pred_sentence.split()) / len(gt_sentence.split())
+                total_wer += (
+                    edit_distance(gt_sentence.split(), pred_sentence.split())
+                    / len(gt_sentence.split())
+                )
                 total_sentences += 1
 
-    avg_wer = total_wer / total_sentences
-    print(f"Average WER: {avg_wer:.4f}")
+    avg_wer = total_wer / total_sentences if total_sentences > 0 else 0.0
     return avg_wer
 
 
 if __name__ == "__main__":
-    # Load model
-    model = ASRModel(5, 5, 512, 40, 28)
+    model = ASRModel(1, 2, 512, 40, 28)  #
     load_model(model)
+
     tokenizer = ASREncoderDecoder()
-    # Get validation dataloader
     val_dataloader = get_validation_dataloader(batch_size=16)
-    # Validate the model
-    validate_model(model, val_dataloader, tokenizer)
+    wer = validate_model(model, val_dataloader, tokenizer)
+    print(f"Validation WER: {wer:.4f}")
+

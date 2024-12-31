@@ -29,10 +29,10 @@ class ResNet(torch.nn.Module):
 class ASRModel(torch.nn.Module):
     def __init__(self, n_resnet_layers, n_rnn_layers, rnn_dim, features, n_class, dropout=0.15):
         super().__init__()
-        features = features // 4
+        features = features // 2
         # If it does not train properly change this 
         # to extract local features slowlier.
-        self.cnn = torch.nn.Conv2d(1, 32, 7, stride=4, padding=2) # Extract local features
+        self.cnn = torch.nn.Conv2d(1, 32, 3, stride=2, padding=1) # Extract local features
         self.rescnn_layers = torch.nn.Sequential(*[
             ResNet(32, 32, kernel=3, stride=1, dropout=dropout, features=features) 
             for _ in range(n_resnet_layers)
@@ -52,7 +52,6 @@ class ASRModel(torch.nn.Module):
         )
     def forward(self, x):
         x = self.cnn(x)
-        print(x.size())
         x = self.rescnn_layers(x)
         sizes = x.size()
         x = x.view(sizes[0], sizes[1] * sizes[2], -1) 

@@ -24,11 +24,8 @@ class CustomLibriSpeech(Dataset):
         return len(self.sample_paths)
 
     def __getitem__(self, idx):
-        # Load spectrogram
         spectrogram = torch.load(self.sample_paths[idx])
-        # Load label
         label = torch.load(self.label_paths[idx])
-        # Calculate input and label lengths
         input_length = spectrogram.shape[0] // 2
         label_length = len(label)
         return spectrogram, label, input_length, label_length
@@ -55,7 +52,6 @@ def preprocess_and_save_data(subset, samples_dir, labels_dir):
 
     print(f'Processing and saving {subset}...')
     for idx, (waveform, _, label, _, _, _) in enumerate(dataset):
-        # Process spectrogram
         spec = mfcc_transform(waveform).squeeze(0).transpose(0, 1)
         sample_path = os.path.join(samples_dir, f'sample_{idx}.pt')
         torch.save(spec, sample_path)
@@ -89,7 +85,6 @@ def get_dataloader(subset, batch_size, samples_dir, labels_dir):
 
 
 def get_train_dataloader(batch_size):
-    # Create directories
     train_samples_dir = os.path.join(data_dir, 'train_samples')
     train_labels_dir = os.path.join(data_dir, 'train_labels')
     os.makedirs(train_samples_dir, exist_ok=True)
@@ -108,17 +103,13 @@ def get_validation_dataloader(batch_size):
 
 
 if __name__ == '__main__':
-    # Example usage
+    # Usage Example
     train_dataloader = get_train_dataloader(16)
     val_dataloader = get_validation_dataloader(16)
-
-    # Check training data
     print("Training Data:")
     for spectrograms, labels, input_lengths, label_lengths in train_dataloader:
         print(spectrograms.shape)
         break
-
-    # Check validation data
     print("Validation Data:")
     for spectrograms, labels, input_lengths, label_lengths in val_dataloader:
         print(spectrograms.shape)

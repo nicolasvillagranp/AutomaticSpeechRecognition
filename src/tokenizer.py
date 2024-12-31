@@ -44,7 +44,7 @@ class ASREncoderDecoder:
         for idx in indices:
             if idx in self.index_to_char:
                 char = self.index_to_char[idx]
-                if char != '<blank>':  # Ignore blank
+                if char != '<blank>':  # Dont pay attention to epsilon
                     chars.append(char)
         return ''.join(chars)
     def __len__(self):
