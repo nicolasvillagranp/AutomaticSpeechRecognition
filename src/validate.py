@@ -8,11 +8,6 @@ from src.model import ASRModel, load_model
 from src.tokenizer import ASREncoderDecoder  # your class
 
 
-
-
-
-
-
 def validate_model(model, dataloader, tokenizer):
     """
     Validate the model on a given dataloader using a CTC beam search decoder,
